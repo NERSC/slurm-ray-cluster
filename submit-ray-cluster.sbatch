@@ -43,6 +43,6 @@ done
 ##############################################################################################
 
 #### call your code below
-module load pytorch/v1.2.0-gpu 
+module load pytorch/v1.4.0-gpu 
 python examples/mnist_pytorch_trainable.py
 exit
