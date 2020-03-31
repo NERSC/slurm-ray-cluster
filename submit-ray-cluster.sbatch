@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -C gpu
-#SBATCH --time=01:00:00
+#SBATCH --time=00:10:00
 
 ### This script works for any number of nodes, Ray will find and manage all resources
 #SBATCH --nodes=1
@@ -11,6 +11,9 @@
 #SBATCH --gpus-per-task=8
 #SBATCH --cpus-per-task=80
 
+
+# Load modules or your own conda environment here
+module load pytorch/v1.4.0-gpu 
 
 ################# DON NOT CHANGE THINGS HERE UNLESS YOU KNOW WHAT YOU ARE DOING ###############
 # This script is a modification to the implementation suggest by gregSchwartz18 here:
@@ -43,6 +46,5 @@ done
 ##############################################################################################
 
 #### call your code below
-module load pytorch/v1.4.0-gpu 
 python examples/mnist_pytorch_trainable.py
 exit
