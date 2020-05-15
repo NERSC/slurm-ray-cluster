@@ -33,7 +33,7 @@ echo "IP Head: $ip_head"
 
 echo "STARTING HEAD at $node_1"
 srun --nodes=1 --ntasks=1 -w $node_1 start-head.sh $ip $redis_password &
-sleep 5
+sleep 30
 
 worker_num=$(($SLURM_JOB_NUM_NODES - 1)) #number of nodes other than the head node
 for ((  i=1; i<=$worker_num; i++ ))
