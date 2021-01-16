@@ -38,7 +38,7 @@ class TrainMyModel(tune.Trainable):
 if __name__ == "__main__":
   # ip_head and redis_passwords are set by ray cluster shell scripts
   print(os.environ["ip_head"], os.environ["redis_password"])
-  ray.init(address='auto', node_ip_address=os.environ["ip_head"].split(":")[0], redis_password=os.environ["redis_password"])
+  ray.init(address='auto', _node_ip_address=os.environ["ip_head"].split(":")[0], _redis_password=os.environ["redis_password"])
   sched = ASHAScheduler(metric="mean_accuracy")
   analysis = tune.run(TrainMyModel,
                       scheduler=sched,
