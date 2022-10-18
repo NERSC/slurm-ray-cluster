@@ -1,77 +1,162 @@
 # Original Code here:
 # https://github.com/pytorch/examples/blob/master/mnist/main.py
-from __future__ import print_function
-
-import argparse
 import os
+import argparse
+from filelock import FileLock
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
+from torchvision import datasets, transforms
 
 import ray
 from ray import tune
-from ray.tune.schedulers import ASHAScheduler
-from ray.tune.examples.mnist_pytorch import (train, test, get_data_loaders,
-                                             ConvNet)
+from ray.tune.schedulers import AsyncHyperBandScheduler
 
 # Change these values if you want the training to run quicker or slower.
 EPOCH_SIZE = 512
 TEST_SIZE = 256
 
-# Training settings
-parser = argparse.ArgumentParser(description="PyTorch MNIST Example")
-parser.add_argument("--use-gpu", action="store_true", default=True, help="enables CUDA training")
-parser.add_argument("--ray-address", type=str, help="The Redis address of the cluster.")
-parser.add_argument("--smoke-test", action="store_true", help="Finish quickly for testing")
 
-# Below comments are for documentation purposes only.
-# yapf: disable
-# __trainable_example_begin__
-class TrainMNIST(tune.Trainable):
-  def setup(self, config):
-    use_cuda = config.get("use_gpu") and torch.cuda.is_available()
-    self.device = torch.device("cuda" if use_cuda else "cpu")
-    self.train_loader, self.test_loader = get_data_loaders()
-    self.model = ConvNet().to(self.device)
-    self.optimizer = optim.SGD(
-        self.model.parameters(),
-        lr=config.get("lr", 0.01),
-        momentum=config.get("momentum", 0.9))
+class ConvNet(nn.Module):
+    def __init__(self):
+        super(ConvNet, self).__init__()
+        self.conv1 = nn.Conv2d(1, 3, kernel_size=3)
+        self.fc = nn.Linear(192, 10)
 
-  def step(self):
-    self.current_ip()
-    train(self.model, self.optimizer, self.train_loader, device=self.device)
-    acc = test(self.model, self.test_loader, self.device)
-    return {"mean_accuracy": acc}
+    def forward(self, x):
+        x = F.relu(F.max_pool2d(self.conv1(x), 3))
+        x = x.view(-1, 192)
+        x = self.fc(x)
+        return F.log_softmax(x, dim=1)
 
-  def save_checkpoint(self, checkpoint_dir):
-    checkpoint_path = os.path.join(checkpoint_dir, "model.pth")
-    torch.save(self.model.state_dict(), checkpoint_path)
-    return checkpoint_path
 
-  def load_checkpoint(self, checkpoint_path):
-    self.model.load_state_dict(torch.load(checkpoint_path))
+def train(model, optimizer, train_loader, device=None):
+    device = device or torch.device("cpu")
+    model.train()
+    for batch_idx, (data, target) in enumerate(train_loader):
+        if batch_idx * len(data) > EPOCH_SIZE:
+            return
+        data, target = data.to(device), target.to(device)
+        optimizer.zero_grad()
+        output = model(data)
+        loss = F.nll_loss(output, target)
+        loss.backward()
+        optimizer.step()
 
-  # this is currently needed to handle Cori GPU multiple interfaces
-  def current_ip(self):
-    import socket
-    hostname = socket.getfqdn(socket.gethostname())
-    self._local_ip = socket.gethostbyname(hostname)
-    return self._local_ip 
+
+def test(model, data_loader, device=None):
+    device = device or torch.device("cpu")
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for batch_idx, (data, target) in enumerate(data_loader):
+            if batch_idx * len(data) > TEST_SIZE:
+                break
+            data, target = data.to(device), target.to(device)
+            outputs = model(data)
+            _, predicted = torch.max(outputs.data, 1)
+            total += target.size(0)
+            correct += (predicted == target).sum().item()
+
+    return correct / total
+
+
+def get_data_loaders():
+    mnist_transforms = transforms.Compose(
+        [transforms.ToTensor(),
+         transforms.Normalize((0.1307, ), (0.3081, ))])
+
+    # We add FileLock here because multiple workers will want to
+    # download data, and this may cause overwrites since
+    # DataLoader is not threadsafe.
+    with FileLock(os.path.expanduser("~/data.lock")):
+        train_loader = torch.utils.data.DataLoader(
+            datasets.MNIST(
+                "~/data",
+                train=True,
+                download=True,
+                transform=mnist_transforms),
+            batch_size=64,
+            shuffle=True)
+        test_loader = torch.utils.data.DataLoader(
+            datasets.MNIST(
+                "~/data",
+                train=False,
+                download=True,
+                transform=mnist_transforms),
+            batch_size=64,
+            shuffle=True)
+    return train_loader, test_loader
+
+
+def train_mnist(config):
+    use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
+    train_loader, test_loader = get_data_loaders()
+    model = ConvNet().to(device)
+
+    optimizer = optim.SGD(
+        model.parameters(), lr=config["lr"], momentum=config["momentum"])
+
+    while True:
+        train(model, optimizer, train_loader, device)
+        acc = test(model, test_loader, device)
+        # Set this to run Tune.
+        tune.report(mean_accuracy=acc)
 
 
 if __name__ == "__main__":
-  # ip_head and redis_passwords are set by ray cluster shell scripts
-  print(os.environ["ip_head"], os.environ["redis_password"])
-  ray.init(address='auto', _node_ip_address=os.environ["ip_head"].split(":")[0], _redis_password=os.environ["redis_password"])
-  sched = ASHAScheduler(metric="mean_accuracy", mode="max")
-  analysis = tune.run(TrainMNIST,
-                      scheduler=sched,
-                      stop={"mean_accuracy": 0.99,
-                            "training_iteration": 100},
-                      resources_per_trial={"cpu":10, "gpu": 1},
-                      num_samples=128,
-                      checkpoint_at_end=True,
-                      config={"lr": tune.uniform(0.001, 1.0),
-                              "momentum": tune.uniform(0.1, 0.9),
-                             "use_gpu": True})
-  print("Best config is:", analysis.get_best_config(metric="mean_accuracy", mode="max"))
+    parser = argparse.ArgumentParser(description="PyTorch MNIST Example")
+    parser.add_argument(
+        "--cuda",
+        action="store_true",
+        default=False,
+        help="Enables GPU training")
+    parser.add_argument(
+        "--smoke-test", action="store_true", help="Finish quickly for testing")
+    parser.add_argument(
+        "--ray-address",
+        help="Address of Ray cluster for seamless distributed execution.")
+    parser.add_argument(
+        "--server-address",
+        type=str,
+        default=None,
+        required=False,
+        help="The address of server to connect to if using "
+        "Ray Client.")
+    args, _ = parser.parse_known_args()
+
+    if args.server_address:
+        ray.init(f"ray://{args.server_address}")
+    elif args.ray_address:
+        ray.init(address=args.ray_address)
+    else:
+        ray.init(num_cpus=2 if args.smoke_test else None)
+
+    # for early stopping
+    sched = AsyncHyperBandScheduler()
+
+    analysis = tune.run(
+        train_mnist,
+        metric="mean_accuracy",
+        mode="max",
+        name="exp",
+        scheduler=sched,
+        stop={
+            "mean_accuracy": 0.98,
+            "training_iteration": 5 if args.smoke_test else 100
+        },
+        resources_per_trial={
+            "cpu": 32,
+            "gpu": int(args.cuda)  # set this for GPUs
+        },
+        num_samples=1 if args.smoke_test else 50,
+        config={
+            "lr": tune.loguniform(1e-4, 1e-2),
+            "momentum": tune.uniform(0.1, 0.9),
+        })
+
+    print("Best config is:", analysis.best_config)
+

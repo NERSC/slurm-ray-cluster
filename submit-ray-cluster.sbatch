@@ -2,22 +2,22 @@
 
 #SBATCH -C gpu
 #SBATCH --time=00:10:00
+#SBATCH -q debug
+#SBATCH -A nstaff
 
 ### This script works for any number of nodes, Ray will find and manage all resources
-#SBATCH --nodes=1
+#SBATCH --nodes=2
 
 ### Give all resources to a single Ray task, ray can manage the resources internally
 #SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-task=8
-#SBATCH --cpus-per-task=80
+#SBATCH --gpus-per-task=4
+#SBATCH --cpus-per-task=128
 
 
 # Load modules or your own conda environment here
-module load pytorch/v1.4.0-gpu 
+# For the keras/tensorflow or pytorch examples, use the corresponding module
+module load pytorch/1.10.0
 
-################# DON NOT CHANGE THINGS HERE UNLESS YOU KNOW WHAT YOU ARE DOING ###############
-# This script is a modification to the implementation suggest by gregSchwartz18 here:
-# https://github.com/ray-project/ray/issues/826#issuecomment-522116599
 redis_password=$(uuidgen)
 export redis_password
 
@@ -25,7 +25,7 @@ nodes=$(scontrol show hostnames $SLURM_JOB_NODELIST) # Getting the node names
 nodes_array=( $nodes )
 
 node_1=${nodes_array[0]} 
-ip=$(srun --nodes=1 --ntasks=1 -w $node_1 hostname --ip-address) # making redis-address
+ip=$node_1
 port=6379
 ip_head=$ip:$port
 export ip_head
@@ -46,5 +46,5 @@ done
 ##############################################################################################
 
 #### call your code below
-python examples/mnist_pytorch_trainable.py
+python examples/mnist_pytorch_trainable.py --cuda
 exit
