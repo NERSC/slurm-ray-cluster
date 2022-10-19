@@ -15,7 +15,6 @@
 
 
 # Load modules or your own conda environment here
-# For the keras/tensorflow or pytorch examples, use the corresponding module
 module load pytorch/1.10.0
 
 redis_password=$(uuidgen)
