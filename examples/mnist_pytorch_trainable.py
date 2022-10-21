@@ -132,8 +132,10 @@ if __name__ == "__main__":
         ray.init(f"ray://{args.server_address}")
     elif args.ray_address:
         ray.init(address=args.ray_address)
+    elif args.smoke_test:
+        ray.init(num_cpus=2)
     else:
-        ray.init(num_cpus=2 if args.smoke_test else None)
+        ray.init(address='auto', _redis_password=os.environ['redis_password'])
 
     # for early stopping
     sched = AsyncHyperBandScheduler()
