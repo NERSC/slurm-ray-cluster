@@ -1,6 +1,6 @@
 """This example demonstrates basic Ray Tune random search and grid search."""
 import time
-
+import os
 import ray
 from ray import tune
 
@@ -38,7 +38,7 @@ if __name__ == "__main__":
     if args.server_address is not None:
         ray.init(f"ray://{args.server_address}")
     else:
-        ray.init(configure_logging=False)
+        ray.init(address='auto', _redis_password=os.environ['redis_password'], configure_logging=False)
 
     # This will do a grid search over the `activation` parameter. This means
     # that each of the two values (`relu` and `tanh`) will be sampled once
