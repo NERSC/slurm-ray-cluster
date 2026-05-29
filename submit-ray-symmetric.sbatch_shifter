@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+
+#SBATCH -C gpu
+#SBATCH --time=00:10:00
+#SBATCH -q regular
+#SBATCH -A nstaff
+
+### This script works for any number of nodes, Ray will find and manage all resources
+#SBATCH --nodes=2
+
+### Give all resources to a single Ray task, ray can manage the resources internally
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-task=4
+#SBATCH --cpus-per-task=128
+GPUS_PER_TASK=$(echo "$SLURM_TRES_PER_TASK" | grep -oP 'gres/gpu=\K\d+') #SLURM_GPUS_PER_TASK is empty
+
+# Getting IP Head
+nodes=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
+nodes_array=( $nodes )
+
+head_node=${nodes_array[0]}
+
+port=6379
+ip_head=$head_node:$port
+export ip_head
+export RAY_ADDRESS="$ip_head"
+export RAY_SYMMETRIC_RUN_CLUSTER_WAIT_TIMEOUT=120
+echo "IP Head: $ip_head"
+SHIFTER_IMAGE="nersc/pytorch:26.01.01"
+
+# NOTE: ray symmetric-run requires ray version > 2.53.0 to work correctly
+
+# Start Ray cluster using symmetric_run.py on all nodes.
+# Symmetric run will automatically start Ray on all nodes and run the script ONLY the head node.
+# Use the '--' separator to separate Ray arguments and the entrypoint command.
+# The --min-nodes argument ensures all nodes join before running the script.
+
+# All nodes (including head and workers) will execute this block.
+# The entrypoint (examples/mnist_pytorch_trainable.py) will only run on the head node.
+
+srun --nodes="$SLURM_JOB_NUM_NODES" --ntasks="$SLURM_JOB_NUM_NODES" \
+    shifter \
+        --image="${SHIFTER_IMAGE}" \
+        --module=gpu,nccl-cu13-plugin \
+        ray symmetric-run \
+        --address "$ip_head" \
+        --min-nodes "$SLURM_JOB_NUM_NODES" \
+        --num-cpus="${SLURM_CPUS_PER_TASK}" \
+        --num-gpus="${GPUS_PER_TASK}" \
+        -- \
+        python examples/mnist_pytorch_trainable.py --cuda
+
+exit
